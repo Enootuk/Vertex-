@@ -5,6 +5,8 @@ if TYPE_CHECKING:
 
 import FunPayAPI.types
 
+import time
+from account_rental.db import get_all_rented_accounts, release_account
 from datetime import datetime
 import Utils.exceptions
 import itertools
@@ -346,3 +348,35 @@ def shut_down():
         process.terminate()
     except:
         pass
+
+from account_rental.db import get_all_rented_accounts, free_account
+from datetime import datetime
+import logging
+
+logger = logging.getLogger("FPV")
+
+def check_and_reset_rentals():
+    from vertex import get_vertex
+    vertex = get_vertex()
+    accounts = get_all_rented_accounts()
+    now = datetime.now()
+
+    for acc in accounts:
+        rent_end = acc["rent_end"]
+        if isinstance(rent_end, str):
+            try:
+                rent_end = datetime.strptime(rent_end, "%Y-%m-%d %H:%M:%S")
+            except:
+                continue
+
+        if rent_end < now:
+            free_account(acc["id"])
+            logger.debug(f"✅ Аккаунт {acc['login']} освобождён.")
+
+            # Отправляем уведомление пользователю
+            if vertex and vertex.account:
+                try:
+                    vertex.account.send_message(acc["renter"], "⏰ Ваша аренда аккаунта завершена. Благодарим за использование сервиса!")
+                    logger.debug(f"📩 Уведомление отправлено пользователю {acc['renter']}.")
+                except Exception as e:
+                    logger.error(f"❗ Ошибка при отправке уведомления: {e}")

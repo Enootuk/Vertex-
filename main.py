@@ -10,6 +10,8 @@ import os
 from vertex import Vertex
 import Utils.exceptions as excs
 from locales.localizer import Localizer
+import threading
+
 
 logo = f"""
 {Fore.CYAN}{Style.BRIGHT}███████╗██╗   ██╗███╗   ██╗██████╗  █████╗ ██╗   ██╗                      

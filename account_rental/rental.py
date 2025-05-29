@@ -1,5 +1,17 @@
 from .db import get_free_account, rent_account
 from datetime import datetime, timedelta
+from .db import get_all_rented_accounts, release_account
+from datetime import datetime
+
+def reset_expired_accounts():
+    now = datetime.now()
+    accounts = get_all_rented_accounts()
+
+    for acc in accounts:
+        if acc["rent_end"] <= now:
+            print(f"[INFO] Сброс аренды: {acc['login']}")
+            release_account(acc["id"])
+
 
 
 def issue_account(renter_id, rent_hours):

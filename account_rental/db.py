@@ -2,7 +2,8 @@ import sqlite3
 import os
 from datetime import datetime, timedelta
 
-DB_NAME = os.path.join(os.path.dirname(__file__), "storage", "accounts.db")
+DB_NAME = r"C:\Users\Rofler\Desktop\RentGame\Vertex++\account_rental\storage\accounts.db"
+
 
 def get_connection():
     conn = sqlite3.connect(DB_NAME)
@@ -38,10 +39,17 @@ def add_account(login, password):
 def get_free_account():
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM accounts WHERE status = "free" LIMIT 1')
+    now = datetime.now()
+    cursor.execute('''
+        SELECT * FROM accounts
+        WHERE status = "free"
+        AND (rent_end IS NULL OR rent_end < ?)
+        LIMIT 1
+    ''', (now,))
     account = cursor.fetchone()
     conn.close()
     return account
+
 
 def rent_account(account_id, renter, rent_hours):
     conn = get_connection()
@@ -88,3 +96,48 @@ if __name__ == "__main__":
         print("✅ База создана и аккаунты добавлены.")
     else:
         print("⚠️ База уже существует.")
+
+def get_all_rented_accounts():
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+
+    cur.execute("SELECT id, login, rent_end, renter FROM accounts WHERE status = 'rented'")
+    rows = cur.fetchall()
+    conn.close()
+
+    accounts = []
+    for row in rows:
+        rent_end_dt = row["rent_end"]
+        if isinstance(rent_end_dt, str):
+            try:
+                rent_end_dt = datetime.strptime(rent_end_dt, "%Y-%m-%d %H:%M:%S")
+            except:
+                continue
+
+        accounts.append({
+            "id": row["id"],
+            "login": row["login"],
+            "rent_end": rent_end_dt,
+            "renter": row["renter"]
+        })
+
+    return accounts
+
+
+
+def release_account(account_id):
+    """
+    Освобождает аккаунт: сбрасывает статус, арендатора и время аренды.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE accounts
+        SET status = 'free', renter = NULL, rent_end = NULL
+        WHERE id = ?
+    """, (account_id,))
+
+    conn.commit()
+    conn.close()
