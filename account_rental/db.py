@@ -1,7 +1,8 @@
 import sqlite3
+import os
 from datetime import datetime, timedelta
 
-DB_NAME = 'accounts.db'
+DB_NAME = os.path.join(os.path.dirname(__file__), "storage", "accounts.db")
 
 def get_connection():
     conn = sqlite3.connect(DB_NAME)

@@ -1,0 +1,5 @@
+[ОШИБКА] В issue_account: Чат с пользователем не найден. Возможно, он не написал первым.
+Traceback (most recent call last):
+  File "C:\Users\Rofler\Desktop\RentGame\Vertex++\handlers.py", line 476, in safe_issue_account
+    raise Exception("Чат с пользователем не найден. Возможно, он не написал первым.")
+Exception: Чат с пользователем не найден. Возможно, он не написал первым.

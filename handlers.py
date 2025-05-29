@@ -377,8 +377,13 @@ def test_auto_delivery_handler(c: Vertex, e: NewMessageEvent | LastChatMessageCh
     date_text = date.strftime("%H:%M")
     html = ORDER_HTML_TEMPLATE.replace("$username", chat_name).replace("$lot_name", lot_name).replace("$date", date_text)
 
-    fake_order = OrderShortcut("ADTEST", lot_name, 0.0, chat_name, 000000, types.OrderStatuses.PAID,
-                               date, "Авто-выдача, Тест", html)
+    fake_order = OrderShortcut(
+        "ADTEST", lot_name, 0.0, chat_name, 000000,
+        types.OrderStatuses.PAID,
+        date, "Авто-выдача, Тест",
+        "https://funpay.com/orders/ADTEST/",  # order_url
+        "<html>тестовая выдача</html>"  # html — последний обязательный аргумент
+    )
 
     fake_event = NewOrderEvent(e.runner_tag, fake_order)
     c.run_handlers(c.new_order_handlers, (c, fake_event,))
@@ -440,11 +445,48 @@ def update_current_lots_handler(c: Vertex, e: OrdersListChangedEvent):
 
 # Новый ордер (REGISTER_TO_NEW_ORDER)
 def log_new_order_handler(c: Vertex, e: NewOrderEvent, *args):
-    """
-    Логирует новый заказ.
-    """
     logger.info(f"Новый заказ! ID: $YELLOW#{e.order.id}$RESET")
 
+import traceback
+
+# ✅ Обновлённая версия safe_issue_account:
+def safe_issue_account(c: Vertex, e: NewOrderEvent):
+    try:
+        if not hasattr(e, "order") or not hasattr(e.order, "buyer_username"):
+            raise Exception("Нет поля buyer_username в объекте order.")
+
+        renter_id = e.order.buyer_username
+        rent_hours = 1
+
+        from account_rental.rental import issue_account
+        account_data = issue_account(renter_id, rent_hours)
+
+        if account_data is None:
+            raise Exception("Нет свободных аккаунтов в базе.")
+
+        response = (
+            f"\u2705 Ваш аккаунт:\n"
+            f"Логин: {account_data['login']}\n"
+            f"Пароль: {account_data['password']}\n"
+            f"Аренда до: {account_data['rent_end']}"
+        )
+
+        chat = c.account.get_chat_by_name(renter_id, True)
+        if not chat:
+            raise Exception("Чат с пользователем не найден. Возможно, он не написал первым.")
+
+        c.account.send_message(chat.id, response)
+        print("✅ Аккаунт успешно выдан.")
+
+    except Exception as ex:
+        error_text = f"[ОШИБКА] В issue_account: {ex}\n"
+        error_text += traceback.format_exc()
+        with open("issue_account_error.txt", "w", encoding="utf-8") as f:
+            f.write(error_text)
+        print("❌ Ошибка в issue_account. Записана в файл issue_account_error.txt.")
+
+# Использование этой функции остаётся в:
+# def setup_event_attributes_handler(...) — ничего менять не нужно.
 
 def setup_event_attributes_handler(c: Vertex, e: NewOrderEvent, *args):
     config_section_name = None
@@ -455,16 +497,31 @@ def setup_event_attributes_handler(c: Vertex, e: NewOrderEvent, *args):
             config_section_name = lot_name
             break
 
-    attributes = {"config_section_name": config_section_name, "config_section_obj": config_section_obj,
-                  "delivered": False, "delivery_text": None, "goods_delivered": 0, "goods_left": None,
-                  "error": 0, "error_text": None}
-    for i in attributes:
-        setattr(e, i, attributes[i])
+    attributes = {
+        "config_section_name": config_section_name,
+        "config_section_obj": config_section_obj,
+        "delivered": False,
+        "delivery_text": None,
+        "goods_delivered": 0,
+        "goods_left": None,
+        "error": 0,
+        "error_text": None
+    }
+    for attr_name, value in attributes.items():
+        setattr(e, attr_name, value)
 
     if config_section_obj is None:
-        logger.info("Лот не найден в конфиге авто-выдачи!")  # todo
+        logger.info("Лот не найден в конфиге авто-выдачи!")
+        return
     else:
-        logger.info("Лот найден в конфиге авто-выдачи!")  # todo
+        logger.info("Лот найден в конфиге авто-выдачи!")
+        # Автовыдача аккаунта при новом заказе
+        from threading import Thread
+        Thread(
+            target=safe_issue_account,
+            args=(c, e),
+            daemon=True
+        ).start()
 
 
 def send_new_order_notification_handler(c: Vertex, e: NewOrderEvent, *args):
@@ -489,7 +546,12 @@ def send_new_order_notification_handler(c: Vertex, e: NewOrderEvent, *args):
     text = _("ntfc_new_order", utils.escape(e.order.description), e.order.buyer_username, e.order.price, e.order.id,
              delivery_info)
 
-    chat_id = c.account.get_chat_by_name(e.order.buyer_username, True).id
+    chat = c.account.get_chat_by_name(e.order.buyer_username, True)
+    if chat is None:
+        print("❌ Чат с пользователем не найден. Возможно, он не писал первым.")
+        return
+    chat_id = chat.id
+
     keyboard = keyboards.new_order(e.order.id, e.order.buyer_username, chat_id)
     Thread(target=c.telegram.send_notification, args=(text, keyboard, utils.NotificationTypes.new_order),
            daemon=True).start()
