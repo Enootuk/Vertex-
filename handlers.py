@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 from FunPayAPI.types import OrderShortcut, Order
 from FunPayAPI import exceptions, utils as fp_utils
 from FunPayAPI.updater.events import *
+from account_rental.rental import issue_account
 
 
 from tg_bot import utils, keyboards
@@ -530,25 +531,53 @@ def deliver_goods(c: Vertex, e: NewOrderEvent, *args):
 
 
 def deliver_product_handler(c: Vertex, e: NewOrderEvent, *args) -> None:
-    """
-    Обертка для deliver_product(), обрабатывающая ошибки.
-    """
-    if not c.MAIN_CFG["FunPay"].getboolean("autoDelivery"):
-        return
-    if e.order.buyer_username in c.blacklist and c.MAIN_CFG["BlockList"].getboolean("blockDelivery"):
-        logger.info(f"Пользователь {e.order.buyer_username} находится в ЧС и включена блокировка автовыдачи. "
-                    f"$YELLOW(ID: {e.order.id})$RESET")
-        return
+    print("🧪 Вызвана функция deliver_product_handler")
 
-    if (config_section_obj := getattr(e, "config_section_obj")) is None:
-        return
-    if config_section_obj.getboolean("disable"):
-        logger.info(f"Для лота \"{e.order.description}\" отключена автовыдача.")
-        return
+    try:
+        if not c.MAIN_CFG["FunPay"].getboolean("autoDelivery"):
+            return
 
-    c.run_handlers(c.pre_delivery_handlers, (c, e))
-    deliver_goods(c, e, *args)
-    c.run_handlers(c.post_delivery_handlers, (c, e))
+        if e.order.buyer_username in c.blacklist and c.MAIN_CFG["BlockList"].getboolean("blockDelivery"):
+            logger.info(f"Пользователь {e.order.buyer_username} находится в ЧС и включена блокировка автовыдачи.")
+            return
+
+        if (config_section_obj := getattr(e, "config_section_obj")) is None:
+            return
+        if config_section_obj.getboolean("disable"):
+            logger.info(f"Для лота \"{e.order.description}\" отключена автовыдача.")
+            return
+
+        c.run_handlers(c.pre_delivery_handlers, (c, e))
+
+        # 🔽 Здесь вызываем аренду
+        from account_rental.rental import issue_account
+        rent_hours = 1  # временно вручную
+        account_data = issue_account(renter_id=e.order.buyer_username, rent_hours=rent_hours)
+
+        if not account_data:
+            logger.error("❌ Нет свободных аккаунтов.")
+            return
+
+        message = (
+            f"🎮 Ваш аккаунт:\n"
+            f"Логин: <code>{account_data['login']}</code>\n"
+            f"Пароль: <code>{account_data['password']}</code>\n"
+            f"Аренда до: <b>{account_data['rent_end']}</b>"
+        )
+
+        chat_id = c.account.get_chat_by_name(e.order.buyer_username).id
+        c.send_message(chat_id, message, e.order.buyer_username)
+
+        e.delivered = True
+        e.delivery_text = message
+        e.goods_delivered = 1
+        e.goods_left = -1
+
+        c.run_handlers(c.post_delivery_handlers, (c, e))
+
+    except Exception as ex:
+        logger.error(f"❗ Ошибка в deliver_product_handler: {ex}")
+
 
 
 # REGISTER_TO_POST_DELIVERY
