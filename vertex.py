@@ -34,7 +34,7 @@ logger = logging.getLogger("FPV")
 localizer = Localizer()
 _ = localizer.translate
 
-threading.Thread(target=check_and_reset_rentals, daemon=True).start()
+
 
 def check_proxy(proxy: dict) -> bool:
     """
@@ -116,8 +116,7 @@ class Vertex(object):
         self.AR_CFG = auto_response_config
         self.RAW_AR_CFG = raw_auto_response_config
 
-        self.auto_reset_thread = threading.Thread(target=check_and_reset_rentals, name="AutoResetLoop", daemon=True)
-        self.auto_reset_thread.start()
+
 
         # Прокси
         self.proxy = {}
@@ -552,6 +551,8 @@ class Vertex(object):
         self.runner = FunPayAPI.Runner(self.account, self.old_mode_enabled)
         self.__update_profile()
         self.run_handlers(self.post_init_handlers, (self, ))
+        Thread(target=self.auto_reset_loop, name="AutoResetLoop", daemon=True).start()
+
         return self
 
     def run(self):
@@ -712,18 +713,15 @@ class Vertex(object):
         vertex_tools.cache_disabled_plugins(self.disabled_plugins)
 
     def auto_reset_loop(self):
-        """
-        Запускает фоновый цикл сброса аренды, по истечению времени.
-        """
         import time
-        from Utils.vertex_tools import check_and_reset_rentals
-
+        logger.info("[AutoReset] Фоновый цикл сброса аренды запущен")
         while True:
             try:
-                check_and_reset_rentals(self)  # проверка и сброс аренды
+                from Utils.vertex_tools import check_and_reset_rentals
+                check_and_reset_rentals(self)
             except Exception as e:
                 logger.error(f"[AutoReset] Ошибка сброса аренды: {e}")
-            time.sleep(30)  # интервал проверки — можно настроить
+            time.sleep(60)
 
     # Настройки
     @property

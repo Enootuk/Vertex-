@@ -63,6 +63,7 @@ def rent_account(account_id, renter, rent_hours):
     conn.close()
 
 def free_account(account_id, new_password=None):
+    print(f"[DB] free_account вызвана для account_id={account_id}")
     conn = get_connection()
     cursor = conn.cursor()
     if new_password:
@@ -98,12 +99,15 @@ if __name__ == "__main__":
         print("⚠️ База уже существует.")
 
 def get_all_rented_accounts():
+    import os
+    print(f"[DB] Используемая база: {os.path.abspath(DB_NAME)}")
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
     cur.execute("SELECT id, login, rent_end, renter FROM accounts WHERE status = 'rented'")
     rows = cur.fetchall()
+    print(f"[DB] Найдено арендованных аккаунтов: {len(rows)}")
     conn.close()
 
     accounts = []
@@ -111,9 +115,15 @@ def get_all_rented_accounts():
         rent_end_dt = row["rent_end"]
         if isinstance(rent_end_dt, str):
             try:
-                rent_end_dt = datetime.strptime(rent_end_dt, "%Y-%m-%d %H:%M:%S")
-            except:
-                continue
+                # Попытка парсинга с микросекундами
+                rent_end_dt = datetime.strptime(rent_end_dt, "%Y-%m-%d %H:%M:%S.%f")
+            except ValueError:
+                try:
+                    # Если не удалось, парсим без микросекунд
+                    rent_end_dt = datetime.strptime(rent_end_dt, "%Y-%m-%d %H:%M:%S")
+                except Exception as e:
+                    print(f"[DB] Ошибка парсинга rent_end для аккаунта {row['login']}: {e}")
+                    continue
 
         accounts.append({
             "id": row["id"],

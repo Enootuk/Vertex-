@@ -6,8 +6,11 @@ if TYPE_CHECKING:
 import FunPayAPI.types
 
 import time
-from account_rental.db import get_all_rented_accounts, release_account
 from datetime import datetime
+from account_rental.db import get_all_rented_accounts, free_account
+import logging
+
+logger = logging.getLogger("FPV")
 import Utils.exceptions
 import itertools
 import psutil
@@ -355,28 +358,63 @@ import logging
 
 logger = logging.getLogger("FPV")
 
-def check_and_reset_rentals():
-    from vertex import get_vertex
-    vertex = get_vertex()
+
+def check_and_reset_rentals(vertex):
+    logger.info("[AUTO-RESET] Фоновый цикл авто-сброса аренды запущен")
+    while True:
+        logger.debug("[AUTO-RESET] Запуск проверки аренды")
+        accounts = get_all_rented_accounts()
+        logger.debug(f"[AUTO-RESET] Найдено {len(accounts)} арендованных аккаунтов")
+
+        now = datetime.now()
+
+        for acc in accounts:
+            rent_end = acc["rent_end"]
+            logger.debug(f"[AUTO-RESET] Аккаунт {acc['login']} — rent_end = {rent_end} (тип: {type(rent_end)})")
+
+            if isinstance(rent_end, str):
+                try:
+                    rent_end = datetime.strptime(rent_end, "%Y-%m-%d %H:%M:%S")
+                    logger.debug(f"[AUTO-RESET] Парсинг rent_end в datetime: {rent_end}")
+                except Exception as e:
+                    logger.error(f"[AUTO-RESET] Ошибка при парсинге rent_end: {e}")
+                    continue
+
+            logger.debug(f"[AUTO-RESET] Сравниваем rent_end {rent_end} < now {now}?")
+
+            if rent_end < now:
+                logger.info(f"[AUTO-RESET] Срок аренды аккаунта {acc['login']} истек, освобождаем.")
+                free_account(acc["id"])
+                logger.info(f"[AUTO-RESET] Аккаунт {acc['login']} освобожден.")
+
+                if vertex and vertex.account:
+                    try:
+                        vertex.account.send_message(
+                            acc["renter"],
+                            "⏰ Ваша аренда аккаунта завершена. Благодарим за использование сервиса!"
+                        )
+                        logger.info(f"[AUTO-RESET] Уведомление отправлено пользователю {acc['renter']}.")
+                    except Exception as e:
+                        logger.error(f"[AUTO-RESET] Ошибка при отправке уведомления: {e}")
+
+        time.sleep(60)
+
+
+def test_reset():
+    """
+    Тестовая функция для ручного запуска проверки аренды и освобождения просроченных аккаунтов.
+    Запускается отдельно из консоли для диагностики.
+    """
     accounts = get_all_rented_accounts()
     now = datetime.now()
-
     for acc in accounts:
         rent_end = acc["rent_end"]
         if isinstance(rent_end, str):
             try:
                 rent_end = datetime.strptime(rent_end, "%Y-%m-%d %H:%M:%S")
-            except:
+            except Exception as e:
+                print(f"[TEST-RESET] Ошибка парсинга rent_end для аккаунта {acc['login']}: {e}")
                 continue
-
         if rent_end < now:
+            print(f"[TEST-RESET] Освобождаю аккаунт {acc['login']} с истекшей арендой ({rent_end})")
             free_account(acc["id"])
-            logger.debug(f"✅ Аккаунт {acc['login']} освобождён.")
-
-            # Отправляем уведомление пользователю
-            if vertex and vertex.account:
-                try:
-                    vertex.account.send_message(acc["renter"], "⏰ Ваша аренда аккаунта завершена. Благодарим за использование сервиса!")
-                    logger.debug(f"📩 Уведомление отправлено пользователю {acc['renter']}.")
-                except Exception as e:
-                    logger.error(f"❗ Ошибка при отправке уведомления: {e}")

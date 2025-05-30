@@ -20,7 +20,10 @@ def check_expired_rentals():
         accounts = get_rented_accounts()
         now = datetime.now()
         for acc in accounts:
-            rent_end = datetime.strptime(acc['rent_end'], '%Y-%m-%d %H:%M:%S')
+            try:
+                rent_end = datetime.strptime(rent_end, "%Y-%m-%d %H:%M:%S.%f")
+            except ValueError:
+                rent_end = datetime.strptime(rent_end, "%Y-%m-%d %H:%M:%S")
             if now >= rent_end:
                 # Меняем пароль
                 new_pass = change_steam_password(acc['login'])
